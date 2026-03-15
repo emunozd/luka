@@ -6,6 +6,7 @@ Se comunica con luka-api via HTTP.
 """
 import logging
 import os
+import re
 from datetime import datetime
 
 import httpx
@@ -126,6 +127,13 @@ def _formatear_preview_texto(data: dict) -> str:
     lines.append(_formatear_categorias(data["categorias"]))
     return "\n".join(lines)
 
+def _enviar_respuesta_agente(texto: str) -> str:
+    """Limpia el markdown del modelo para que Telegram lo renderice bien."""
+    # Convertir **texto** → <b>texto</b>  y  *texto* → <i>texto</i>
+    texto = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', texto)
+    texto = re.sub(r'\*(.+?)\*',     r'<i>\1</i>', texto)
+    return texto
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Handlers — sin cambios respecto al original
 # ─────────────────────────────────────────────────────────────────────────────
@@ -155,7 +163,10 @@ async def handle_texto_libre(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update.message.reply_text("⏳ Procesando...")
     try:
         respuesta = agente_luka(texto, token)
-        await update.message.reply_text(respuesta)
+        await update.message.reply_text(
+            _enviar_respuesta_agente(respuesta),
+            parse_mode="HTML",
+        )
     except Exception as e:
         logger.error("Error en agente_luka: %s", e)
         await update.message.reply_text("❌ No pude procesar eso. Intenta de nuevo.")
