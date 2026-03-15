@@ -178,28 +178,62 @@ def _tool_ver_reporte(mes: str, token: str) -> str:
 
 def _tool_ver_ultimos(token: str) -> str:
     with httpx.Client(timeout=30.0) as client:
-        r = client.get(f"{API_URL}/gastos/manual", headers=_headers(token))
-        r.raise_for_status()
-        gastos = r.json()[:5]
-    if not gastos:
+        r_gastos = client.get(f"{API_URL}/gastos/manual", headers=_headers(token))
+        r_gastos.raise_for_status()
+        gastos = r_gastos.json()
+
+        r_facturas = client.get(f"{API_URL}/facturas/", headers=_headers(token))
+        r_facturas.raise_for_status()
+        facturas = r_facturas.json()
+
+    combinados = []
+    for g in gastos:
+        combinados.append({
+            "id":          g["id"],
+            "tipo":        "gasto_manual",
+            "descripcion": g["descripcion"],
+            "monto":       g["monto"],
+            "fecha":       g["fecha"],
+        })
+    for f in facturas:
+        combinados.append({
+            "id":          f["id"],
+            "tipo":        "factura",
+            "descripcion": f.get("comercio") or "Factura sin comercio",
+            "monto":       f.get("total") or 0,
+            "fecha":       f.get("fecha_factura") or f.get("creado_en", "")[:10],
+        })
+
+    combinados.sort(key=lambda x: x.get("fecha", ""), reverse=True)
+    ultimos = combinados[:5]
+
+    if not ultimos:
         return "No tienes gastos registrados."
-    lines = ["Últimos gastos:"]
-    for i, g in enumerate(gastos, 1):
+
+    lines = ["Últimos registros:"]
+    for i, r in enumerate(ultimos, 1):
+        tipo_label = "factura" if r["tipo"] == "factura" else "gasto manual"
         lines.append(
-            f"{i}. [{g['id']}] {g['categoria']} — ${float(g['monto']):,.0f}"
-            f" ({g['descripcion']}) {g['fecha']}"
+            f"{i}. [{r['id']}] [{tipo_label}] {r['descripcion']} — "
+            f"${float(r['monto']):,.0f} ({r['fecha']})"
         )
     return "\n".join(lines)
 
 
 def _tool_borrar_gasto(gasto_id: str, token: str) -> str:
+    # Intentar primero como gasto manual, luego como factura
     with httpx.Client(timeout=30.0) as client:
         r = client.delete(
             f"{API_URL}/gastos/manual/{gasto_id}",
             headers=_headers(token),
         )
+        if r.status_code == 404:
+            r = client.delete(
+                f"{API_URL}/facturas/{gasto_id}",
+                headers=_headers(token),
+            )
         r.raise_for_status()
-    return "Gasto eliminado correctamente."
+    return "Registro eliminado correctamente."
 
 
 # ─────────────────────────────────────────────────────────────────────────────
