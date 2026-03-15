@@ -277,8 +277,8 @@ def agente_luka(texto: str, token: str) -> dict:
     if stop_reason != "tool_use":
         for block in content_blocks:
             if block.get("type") == "text":
-                return block.get("text", "No entendí eso. Intenta de nuevo.")
-        return "No entendí eso. Intenta de nuevo."
+                return {"tipo": "texto", "respuesta": block.get("text", "No entendí eso. Intenta de nuevo.")}
+        return {"tipo": "texto", "respuesta": "No entendí eso. Intenta de nuevo."}
 
     # Con tool calls → ejecutar cada una
     tool_results = []
