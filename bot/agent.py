@@ -34,6 +34,10 @@ REGLAS:
 - Si no es ninguna de las anteriores → responde directamente en texto, amigable y breve.
 - NUNCA respondas en inglés. SIEMPRE en español colombiano.
 - Sé conciso. Máximo 3 líneas cuando no hay datos que mostrar.
+- Si el usuario quiere borrar un registro específico y ya tienes su ID del listado anterior → 
+responde ÚNICAMENTE con este formato exacto y nada más: BORRAR_PENDIENTE|<id>|<descripcion>|<monto>
+Ejemplo: BORRAR_PENDIENTE|uuid-aqui|Jumbo|490664
+NO confirmes en texto. NO preguntes. Solo emite ese marcador.
 """
 
 TOOLS = [
@@ -240,7 +244,12 @@ def _tool_borrar_gasto(gasto_id: str, token: str) -> str:
 # Loop del agente
 # ─────────────────────────────────────────────────────────────────────────────
 
-def agente_luka(texto: str, token: str) -> str:
+def agente_luka(texto: str, token: str) -> dict:
+    """
+    Retorna:
+      {"tipo": "texto", "respuesta": str}
+      {"tipo": "confirmar_borrado", "respuesta": str, "id": str, "descripcion": str, "monto": float}
+    """
     messages = [{"role": "user", "content": texto}]
 
     with httpx.Client(timeout=120.0) as client:
@@ -307,5 +316,15 @@ def agente_luka(texto: str, token: str) -> str:
 
     for block in respuesta_final.get("content", []):
         if block.get("type") == "text":
-            return block.get("text", "Listo.")
-    return "Listo."
+            texto = block.get("text", "").strip()
+            if texto.startswith("BORRAR_PENDIENTE|"):
+                partes = texto.split("|")
+                return {
+                    "tipo":        "confirmar_borrado",
+                    "id":          partes[1],
+                    "descripcion": partes[2],
+                    "monto":       float(partes[3]),
+                    "respuesta":   f"Listo, voy a eliminar {partes[2]} — ${float(partes[3]):,.0f}",
+                }
+            return {"tipo": "texto", "respuesta": texto}
+    return {"tipo": "texto", "respuesta": "Listo."}

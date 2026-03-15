@@ -38,6 +38,7 @@ VINCULAR_CODIGO = 2
 KEY_TOKEN   = "jwt_token"
 KEY_ULTIMOS = "ultimos_gastos"
 KEY_PREVIEW = "preview_data"
+KEY_BORRAR_PENDIENTE = "borrar_pendiente"
 
 COMANDOS_TEXTO = (
     "Comandos disponibles:\n"
@@ -162,11 +163,28 @@ async def handle_texto_libre(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     await update.message.reply_text("⏳ Procesando...")
     try:
-        respuesta = agente_luka(texto, token)
-        await update.message.reply_text(
-            _enviar_respuesta_agente(respuesta),
-            parse_mode="HTML",
-        )
+        resultado = agente_luka(texto, token)
+
+        if resultado["tipo"] == "confirmar_borrado":
+            context.user_data[KEY_BORRAR_PENDIENTE] = {
+                "id":          resultado["id"],
+                "descripcion": resultado["descripcion"],
+                "monto":       resultado["monto"],
+            }
+            keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton("✅ Confirmar", callback_data="confirmar_borrado_agente"),
+                InlineKeyboardButton("❌ Cancelar",  callback_data="cancelar_borrado_agente"),
+            ]])
+            await update.message.reply_text(
+                f"🗑️ ¿Eliminar *{resultado['descripcion']}* — ${resultado['monto']:,.0f}?",
+                parse_mode="Markdown",
+                reply_markup=keyboard,
+            )
+        else:
+            await update.message.reply_text(
+                _enviar_respuesta_agente(resultado["respuesta"]),
+                parse_mode="HTML",
+            )
     except Exception as e:
         logger.error("Error en agente_luka: %s", e)
         await update.message.reply_text("❌ No pude procesar eso. Intenta de nuevo.")
@@ -332,6 +350,42 @@ async def callback_cancelar_preview(update: Update, context: ContextTypes.DEFAUL
     context.user_data.pop(KEY_PREVIEW, None)
     await query.edit_message_text("❌ Cancelado. No se guardó nada.")
 
+async def callback_confirmar_borrado_agente(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    token    = _token_o_recuperar(context, update.effective_user.id)
+    pendiente = context.user_data.get(KEY_BORRAR_PENDIENTE)
+    if not token or not pendiente:
+        await query.edit_message_text("❌ Sesión expirada. Intenta nuevamente.")
+        return
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            # intentar gasto manual primero, luego factura
+            r = client.delete(
+                f"{API_URL}/gastos/manual/{pendiente['id']}",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            if r.status_code == 404:
+                r = client.delete(
+                    f"{API_URL}/facturas/{pendiente['id']}",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+            r.raise_for_status()
+        await query.edit_message_text(
+            f"✅ Eliminado: {pendiente['descripcion']} — ${pendiente['monto']:,.0f}"
+        )
+    except Exception as e:
+        logger.error("Error en callback_confirmar_borrado_agente: %s", e)
+        await query.edit_message_text("❌ No se pudo eliminar. Intenta de nuevo.")
+    finally:
+        context.user_data.pop(KEY_BORRAR_PENDIENTE, None)
+
+async def callback_cancelar_borrado_agente(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    context.user_data.pop(KEY_BORRAR_PENDIENTE, None)
+    await query.edit_message_text("❌ Cancelado. No se eliminó nada.")
+
 async def cmd_reporte(update: Update, context: ContextTypes.DEFAULT_TYPE):
     token = _token_o_recuperar(context, update.effective_user.id)
     if not token:
@@ -474,6 +528,8 @@ def main():
     app.add_handler(CallbackQueryHandler(callback_confirmar_foto,   pattern="^confirmar_foto$"))
     app.add_handler(CallbackQueryHandler(callback_confirmar_texto,  pattern="^confirmar_texto$"))
     app.add_handler(CallbackQueryHandler(callback_cancelar_preview, pattern="^cancelar_preview$"))
+    app.add_handler(CallbackQueryHandler(callback_confirmar_borrado_agente, pattern="^confirmar_borrado_agente$"))
+    app.add_handler(CallbackQueryHandler(callback_cancelar_borrado_agente,  pattern="^cancelar_borrado_agente$"))
     app.add_handler(MessageHandler(filters.PHOTO, handle_foto))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_texto_libre))
     app.add_handler(MessageHandler(filters.COMMAND, cmd_desconocido))
