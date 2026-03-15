@@ -362,24 +362,43 @@ async def cmd_ultimos(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ Primero vincula tu cuenta con /vincular")
         return
     try:
-        gastos  = _get("/gastos/manual", token)
-        ultimos = gastos[:5]
+        gastos   = _get("/gastos/manual", token)
+        facturas = _get("/facturas/", token)
+
+        combinados = []
+        for g in gastos:
+            combinados.append({**g, "_tipo": "gasto"})
+        for f in facturas:
+            combinados.append({
+                "id":          f["id"],
+                "descripcion": f.get("comercio") or "Factura sin comercio",
+                "monto":       f.get("total") or 0,
+                "categoria":   "FACTURA",
+                "fecha":       f.get("fecha_factura") or f.get("creado_en", "")[:10],
+                "_tipo":       "factura",
+            })
+
+        combinados.sort(key=lambda x: x.get("fecha", ""), reverse=True)
+        ultimos = combinados[:5]
+
         if not ultimos:
             await update.message.reply_text("📭 No tienes gastos registrados.")
             context.user_data[KEY_ULTIMOS] = []
             return
+
         context.user_data[KEY_ULTIMOS] = ultimos
-        lines = ["📋 *Últimos gastos:*\n"]
-        for i, g in enumerate(ultimos, 1):
+        lines = ["📋 *Últimos registros:*\n"]
+        for i, r in enumerate(ultimos, 1):
+            icono = "🧾" if r["_tipo"] == "factura" else "💸"
             lines.append(
-                f"  *{i}.* {g['categoria']} — ${float(g['monto']):,.0f}\n"
-                f"      {g['descripcion']} ({g['fecha']})"
+                f"  *{i}.* {icono} {r['descripcion']} — ${float(r['monto']):,.0f}\n"
+                f"      {r['fecha']}"
             )
         lines.append("\nUsa /borrar <número> para eliminar uno.")
         await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
     except Exception as e:
         logger.error("Error en cmd_ultimos: %s", e)
-        await update.message.reply_text("❌ No se pudieron obtener los últimos gastos. Intenta de nuevo.")
+        await update.message.reply_text("❌ No se pudieron obtener los últimos registros. Intenta de nuevo.")
 
 async def cmd_borrar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     token = _token_o_recuperar(context, update.effective_user.id)
@@ -388,7 +407,7 @@ async def cmd_borrar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     ultimos = context.user_data.get(KEY_ULTIMOS)
     if not ultimos:
-        await update.message.reply_text("⚠️ Primero ejecuta /ultimos para ver tus gastos recientes.")
+        await update.message.reply_text("⚠️ Primero ejecuta /ultimos para ver tus registros recientes.")
         return
     if not context.args:
         await update.message.reply_text("📝 Uso: /borrar <número>\nEjemplo: /borrar 2")
@@ -401,21 +420,23 @@ async def cmd_borrar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if numero < 1 or numero > len(ultimos):
         await update.message.reply_text(f"❌ Número inválido. Elige entre 1 y {len(ultimos)}.")
         return
-    gasto = ultimos[numero - 1]
+
+    registro = ultimos[numero - 1]
+    tipo     = registro["_tipo"]
+    path     = f"/facturas/{registro['id']}" if tipo == "factura" else f"/gastos/manual/{registro['id']}"
+
     try:
         with httpx.Client(timeout=30.0) as client:
-            r = client.delete(
-                f"{API_URL}/gastos/manual/{gasto['id']}",
-                headers={"Authorization": f"Bearer {token}"},
-            )
+            r = client.delete(f"{API_URL}{path}", headers={"Authorization": f"Bearer {token}"})
             r.raise_for_status()
         context.user_data[KEY_ULTIMOS] = None
+        icono = "🧾" if tipo == "factura" else "💸"
         await update.message.reply_text(
-            f"✅ Eliminado: {gasto['categoria']} — ${float(gasto['monto']):,.0f} ({gasto['descripcion']})"
+            f"✅ Eliminado: {icono} {registro['descripcion']} — ${float(registro['monto']):,.0f}"
         )
     except Exception as e:
         logger.error("Error en cmd_borrar: %s", e)
-        await update.message.reply_text("❌ No se pudo eliminar el gasto. Intenta de nuevo.")
+        await update.message.reply_text("❌ No se pudo eliminar el registro. Intenta de nuevo.")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # App

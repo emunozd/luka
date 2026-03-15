@@ -181,6 +181,23 @@ async def confirmar_factura_foto(
             "categorias": payload["categorias"],
             "nota":       "Guardado como gastos manuales por falta de comercio o fecha.",
         }
+    
+@router.delete("/{factura_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def eliminar_factura(
+    factura_id: str,
+    db: AsyncSession = Depends(get_db),
+    usuario: Usuario = Depends(get_usuario_actual),
+):
+    result = await db.execute(
+        select(Factura)
+        .where(Factura.id == factura_id)
+        .where(Factura.usuario_id == usuario.id)
+    )
+    factura = result.scalar_one_or_none()
+    if not factura:
+        raise HTTPException(status_code=404, detail="Factura no encontrada.")
+    await db.delete(factura)
+    await db.commit()
 
 @router.get("/", response_model=list[FacturaOut])
 async def listar_facturas(
