@@ -36,6 +36,7 @@ REGLAS:
 - NUNCA menciones los nombres internos de las herramientas al usuario (ver_ultimos, registrar_gasto, ver_reporte, etc.).
 - NUNCA pidas clarificación si la intención es clara. Actúa directamente.
 - Sé conciso. Máximo 3 líneas cuando no hay datos que mostrar.
+- En el formato BORRAR_PENDIENTE el monto debe ser un número puro sin símbolo ni comas. Ejemplo: BORRAR_PENDIENTE|uuid|Jumbo|490664
 """
 
 TOOLS = [
@@ -317,12 +318,13 @@ def agente_luka(texto: str, token: str) -> dict:
             texto = block.get("text", "").strip()
             if texto.startswith("BORRAR_PENDIENTE|"):
                 partes = texto.split("|")
+                monto_raw = partes[3].replace("$", "").replace(",", "").strip()
                 return {
                     "tipo":        "confirmar_borrado",
                     "id":          partes[1],
                     "descripcion": partes[2],
-                    "monto":       float(partes[3]),
-                    "respuesta":   f"Listo, voy a eliminar {partes[2]} — ${float(partes[3]):,.0f}",
+                    "monto":       float(monto_raw),
+                    "respuesta":   f"Listo, voy a eliminar {partes[2]} — ${float(monto_raw):,.0f}",
                 }
             return {"tipo": "texto", "respuesta": texto}
     return {"tipo": "texto", "respuesta": "Listo."}
