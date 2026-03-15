@@ -155,7 +155,7 @@ async def handle_texto_libre(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update.message.reply_text("⏳ Procesando...")
     try:
         respuesta = agente_luka(texto, token)
-        await update.message.reply_text(respuesta, parse_mode="Markdown")
+        await update.message.reply_text(respuesta)
     except Exception as e:
         logger.error("Error en agente_luka: %s", e)
         await update.message.reply_text("❌ No pude procesar eso. Intenta de nuevo.")
