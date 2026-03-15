@@ -207,22 +207,17 @@ def _tool_borrar_gasto(gasto_id: str, token: str) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def agente_luka(texto: str, token: str) -> str:
-    """
-    Punto de entrada principal.
-    Recibe el texto libre del usuario y el JWT.
-    Devuelve string listo para enviar por Telegram.
-    Máximo 2 rondas: decisión inicial + ejecución de tools.
-    """
     messages = [{"role": "user", "content": texto}]
 
     with httpx.Client(timeout=120.0) as client:
+        # Ronda 1 — usar /v1/messages (Anthropic-compatible, tool calling funcional)
         r = client.post(
-            f"{AIBASE_URL}/v1/chat/completions",
+            f"{AIBASE_URL}/v1/messages",
             json={
                 "model":       "luka",
                 "messages":    messages,
                 "tools":       TOOLS,
-                "tool_choice": "auto",
+                "tool_choice": {"type": "auto"},
                 "max_tokens":  512,
                 "system":      SYSTEM_PROMPT,
             },
@@ -231,42 +226,52 @@ def agente_luka(texto: str, token: str) -> str:
         r.raise_for_status()
         respuesta = r.json()
 
-    choice  = respuesta["choices"][0]
-    mensaje = choice["message"]
+    # Parsear respuesta formato Anthropic
+    content_blocks = respuesta.get("content", [])
+    stop_reason    = respuesta.get("stop_reason", "end_turn")
 
-    # Sin tool calls → respuesta directa de texto
-    if not mensaje.get("tool_calls"):
-        return mensaje.get("content", "No entendí eso. Intenta de nuevo.")
+    # Sin tool calls → texto directo
+    if stop_reason != "tool_use":
+        for block in content_blocks:
+            if block.get("type") == "text":
+                return block.get("text", "No entendí eso. Intenta de nuevo.")
+        return "No entendí eso. Intenta de nuevo."
 
-    # Con tool calls → ejecutar y volver al modelo con resultados
+    # Con tool calls → ejecutar cada una
     tool_results = []
-    for tc in mensaje["tool_calls"]:
-        nombre    = tc["function"]["name"]
-        args      = json.loads(tc["function"]["arguments"])
+    for block in content_blocks:
+        if block.get("type") != "tool_use":
+            continue
+        nombre    = block["name"]
+        args      = block.get("input", {})
+        tool_id   = block["id"]
         logger.info("Ejecutando tool: %s args: %s", nombre, args)
         resultado = _ejecutar_tool(nombre, args, token)
         tool_results.append({
-            "role":         "tool",
-            "tool_call_id": tc["id"],
-            "content":      resultado,
+            "type":        "tool_result",
+            "tool_use_id": tool_id,
+            "content":     resultado,
         })
 
-    # Ronda 2: respuesta final en lenguaje natural
-    messages.append({"role": "assistant", "tool_calls": mensaje["tool_calls"]})
-    messages.extend(tool_results)
+    # Ronda 2 — devolver resultados al modelo para respuesta final
+    messages.append({"role": "assistant", "content": content_blocks})
+    messages.append({"role": "user",      "content": tool_results})
 
     with httpx.Client(timeout=60.0) as client:
         r = client.post(
-            f"{AIBASE_URL}/v1/chat/completions",
+            f"{AIBASE_URL}/v1/messages",
             json={
-                "model":    "luka",
-                "messages": messages,
+                "model":      "luka",
+                "messages":   messages,
                 "max_tokens": 512,
-                "system":   SYSTEM_PROMPT,
+                "system":     SYSTEM_PROMPT,
             },
             headers={"Content-Type": "application/json"},
         )
         r.raise_for_status()
         respuesta_final = r.json()
 
-    return respuesta_final["choices"][0]["message"].get("content", "Listo.")
+    for block in respuesta_final.get("content", []):
+        if block.get("type") == "text":
+            return block.get("text", "Listo.")
+    return "Listo."
