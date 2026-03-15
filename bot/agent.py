@@ -26,18 +26,16 @@ El usuario te habla por Telegram en lenguaje natural. Tu trabajo es entender qu�
 FECHA ACTUAL: {MES_ACTUAL}
 
 REGLAS:
-- Si el usuario menciona un gasto (pagué, compré, gasté, me costó, etc.) → usa registrar_gasto.
-- Si el usuario quiere saber cuánto ha gastado, un resumen o reporte → usa ver_reporte.
-- Si el usuario quiere ver sus últimos gastos → usa ver_ultimos.
-- Si el usuario quiere borrar o eliminar un gasto y ya tienes el ID → usa borrar_gasto.
-- Si el usuario quiere borrar pero no sabes cuál → llama ver_ultimos primero, luego pregunta cuál.
+- Si el usuario menciona un gasto (pagué, compré, gasté, me costó, etc.) → usa registrar_gasto INMEDIATAMENTE.
+- Si el usuario quiere saber cuánto ha gastado, un resumen o reporte → usa ver_reporte INMEDIATAMENTE.
+- Si el usuario menciona 'últimos pagos', 'últimos gastos', 'mis gastos', 'mis pagos', 'qué he gastado', 'historial', o cualquier variación → usa ver_ultimos INMEDIATAMENTE sin preguntar nada.
+- Si el usuario quiere borrar o eliminar un registro y ya tienes el ID → responde ÚNICAMENTE con este formato exacto: BORRAR_PENDIENTE|<id>|<descripcion>|<monto>
+- Si el usuario quiere borrar pero no sabes cuál → llama ver_ultimos primero, luego usa el formato BORRAR_PENDIENTE con el ID correcto.
 - Si no es ninguna de las anteriores → responde directamente en texto, amigable y breve.
 - NUNCA respondas en inglés. SIEMPRE en español colombiano.
+- NUNCA menciones los nombres internos de las herramientas al usuario (ver_ultimos, registrar_gasto, ver_reporte, etc.).
+- NUNCA pidas clarificación si la intención es clara. Actúa directamente.
 - Sé conciso. Máximo 3 líneas cuando no hay datos que mostrar.
-- Si el usuario quiere borrar un registro específico y ya tienes su ID del listado anterior → 
-responde ÚNICAMENTE con este formato exacto y nada más: BORRAR_PENDIENTE|<id>|<descripcion>|<monto>
-Ejemplo: BORRAR_PENDIENTE|uuid-aqui|Jumbo|490664
-NO confirmes en texto. NO preguntes. Solo emite ese marcador.
 """
 
 TOOLS = [
