@@ -39,6 +39,7 @@ KEY_TOKEN   = "jwt_token"
 KEY_ULTIMOS = "ultimos_gastos"
 KEY_PREVIEW = "preview_data"
 KEY_BORRAR_PENDIENTE = "borrar_pendiente"
+KEY_GASTO_PENDIENTE = "gasto_pendiente"
 
 COMANDOS_TEXTO = (
     "Comandos disponibles:\n"
@@ -180,6 +181,17 @@ async def handle_texto_libre(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 parse_mode="Markdown",
                 reply_markup=keyboard,
             )
+        elif resultado["tipo"] == "confirmar_gasto":
+            context.user_data[KEY_GASTO_PENDIENTE] = resultado["preview"]
+            keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton("✅ Guardar",   callback_data="confirmar_gasto_agente"),
+                InlineKeyboardButton("❌ Cancelar",  callback_data="cancelar_gasto_agente"),
+            ]])
+            await update.message.reply_text(
+                _enviar_respuesta_agente(resultado["respuesta"]),
+                parse_mode="HTML",
+                reply_markup=keyboard,
+            )            
         else:
             await update.message.reply_text(
                 _enviar_respuesta_agente(resultado["respuesta"]),
@@ -386,6 +398,29 @@ async def callback_cancelar_borrado_agente(update: Update, context: ContextTypes
     context.user_data.pop(KEY_BORRAR_PENDIENTE, None)
     await query.edit_message_text("❌ Cancelado. No se eliminó nada.")
 
+async def callback_confirmar_gasto_agente(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    token   = _token_o_recuperar(context, update.effective_user.id)
+    preview = context.user_data.get(KEY_GASTO_PENDIENTE)
+    if not token or not preview:
+        await query.edit_message_text("❌ Sesión expirada. Intenta nuevamente.")
+        return
+    try:
+        _post("/facturas/texto/confirmar", preview, token=token)
+        await query.edit_message_text("✅ ¡Gasto guardado exitosamente!")
+    except Exception as e:
+        logger.error("Error en callback_confirmar_gasto_agente: %s", e)
+        await query.edit_message_text("❌ No se pudo guardar. Intenta de nuevo.")
+    finally:
+        context.user_data.pop(KEY_GASTO_PENDIENTE, None)
+
+async def callback_cancelar_gasto_agente(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    context.user_data.pop(KEY_GASTO_PENDIENTE, None)
+    await query.edit_message_text("❌ Cancelado. No se guardó nada.")
+
 async def cmd_reporte(update: Update, context: ContextTypes.DEFAULT_TYPE):
     token = _token_o_recuperar(context, update.effective_user.id)
     if not token:
@@ -530,6 +565,8 @@ def main():
     app.add_handler(CallbackQueryHandler(callback_cancelar_preview, pattern="^cancelar_preview$"))
     app.add_handler(CallbackQueryHandler(callback_confirmar_borrado_agente, pattern="^confirmar_borrado_agente$"))
     app.add_handler(CallbackQueryHandler(callback_cancelar_borrado_agente,  pattern="^cancelar_borrado_agente$"))
+    app.add_handler(CallbackQueryHandler(callback_confirmar_gasto_agente, pattern="^confirmar_gasto_agente$"))
+    app.add_handler(CallbackQueryHandler(callback_cancelar_gasto_agente,  pattern="^cancelar_gasto_agente$"))
     app.add_handler(MessageHandler(filters.PHOTO, handle_foto))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_texto_libre))
     app.add_handler(MessageHandler(filters.COMMAND, cmd_desconocido))

@@ -156,19 +156,21 @@ def _ejecutar_tool(nombre: str, args: dict, token: str) -> str:
 
 
 def _tool_registrar_gasto(descripcion: str, token: str) -> str:
+    """Llama al endpoint de preview (categoriza sin guardar) y devuelve el resultado."""
     with httpx.Client(timeout=120.0) as client:
         r = client.post(
-            f"{API_URL}/gastos/manual",
-            json={"canal": "telegram", "descripcion": descripcion},
+            f"{API_URL}/facturas/texto/preview",
+            json={"texto": descripcion},
             headers=_headers(token),
         )
         r.raise_for_status()
-        gastos = r.json()
-    if not gastos:
-        return "No se pudo registrar ningún gasto."
-    lines = ["Gastos registrados:"]
-    for g in gastos:
-        lines.append(f"- {g['categoria']}: ${float(g['monto']):,.0f} — {g['descripcion']}")
+        preview = r.json()
+    if not preview.get("categorias"):
+        return "No se pudo categorizar el gasto."
+    lines = ["PREVIEW_GASTO"]
+    lines.append(f"raw_text={descripcion}")
+    for cat, monto in preview["categorias"].items():
+        lines.append(f"{cat}:{monto}")
     return "\n".join(lines)
 
 
@@ -296,6 +298,7 @@ def agente_luka(texto: str, token: str) -> dict:
 
     # Con tool calls → ejecutar cada una
     tool_results = []
+    preview_gasto = None
     for block in content_blocks:
         if block.get("type") != "tool_use":
             continue
@@ -304,11 +307,37 @@ def agente_luka(texto: str, token: str) -> dict:
         tool_id   = block["id"]
         logger.info("Ejecutando tool: %s args: %s", nombre, args)
         resultado = _ejecutar_tool(nombre, args, token)
+
+         # Interceptar preview de gasto antes de ir a ronda 2
+        if nombre == "registrar_gasto" and resultado.startswith("PREVIEW_GASTO"):
+            lineas = resultado.split("\n")
+            raw_text = next((l.split("=", 1)[1] for l in lineas if l.startswith("raw_text=")), "")
+            categorias = {}
+            for l in lineas[2:]:
+                if ":" in l:
+                    cat, monto = l.split(":", 1)
+                    categorias[cat] = float(monto)
+            preview_gasto = {"texto": raw_text, "categorias": categorias}
+            resultado = "Preview generado correctamente."
+
         tool_results.append({
             "type":        "tool_result",
             "tool_use_id": tool_id,
             "content":     resultado,
         })
+
+        # Si hay preview de gasto → retornar para confirmación sin ir a ronda 2
+    if preview_gasto:
+        total = sum(preview_gasto["categorias"].values())
+        lineas_preview = ["Esto es lo que voy a registrar:"]
+        for cat, monto in preview_gasto["categorias"].items():
+            lineas_preview.append(f"- {cat}: ${float(monto):,.0f}")
+        lineas_preview.append(f"Total: ${total:,.0f}")
+        return {
+            "tipo":        "confirmar_gasto",
+            "respuesta":   "\n".join(lineas_preview),
+            "preview":     preview_gasto,
+        }
 
     # Ronda 2 — devolver resultados al modelo para respuesta final
     messages.append({"role": "assistant", "content": content_blocks})
