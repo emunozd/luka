@@ -33,7 +33,7 @@ ACCIONES DISPONIBLES — solo puedes hacer estas cuatro cosas:
 
 REGLAS:
 - Si el usuario menciona un gasto (pagué, compré, gasté, me costó, etc.) → usa registrar_gasto INMEDIATAMENTE.
-- Si el usuario quiere saber cuánto ha gastado, un resumen o reporte → usa ver_reporte INMEDIATAMENTE.
+- Si el usuario quiere saber cuánto ha gastado, un resumen o reporte (de cualquier mes, incluyendo meses anteriores) → usa ver_reporte INMEDIATAMENTE. Puedes consultar cualquier mes histórico, no solo el actual.
 - Si el usuario menciona 'últimos pagos', 'últimos gastos', 'mis gastos', 'mis pagos', 'qué he gastado', 'historial', o cualquier variación → usa ver_ultimos INMEDIATAMENTE sin preguntar nada.
 - Si el usuario quiere borrar o eliminar un registro y ya tienes el ID → responde ÚNICAMENTE con este formato exacto: BORRAR_PENDIENTE|<id>|<descripcion>|<monto>
 - Si el usuario quiere borrar pero no sabes cuál → llama ver_ultimos primero, luego usa el formato BORRAR_PENDIENTE con el ID correcto.
@@ -81,7 +81,11 @@ TOOLS = [
                 "properties": {
                     "mes": {
                         "type": "string",
-                        "description": f"Mes en formato YYYY-MM. Si no se especifica, usa el mes actual: {MES_ACTUAL}",
+                        "description": (
+                            "Mes en formato YYYY-MM. Puede ser cualquier mes histórico. "
+                            "Si el usuario dice 'mes pasado' calcula el mes anterior al actual ({MES_ACTUAL}). "
+                            "Si no especifica mes, usa el actual: {MES_ACTUAL}."
+                        ),
                     }
                 },
                 "required": ["mes"],
