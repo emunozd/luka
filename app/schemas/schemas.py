@@ -54,7 +54,13 @@ class GastoManualOut(BaseModel):
 
     model_config = {"from_attributes": True}
 
-
+class GastoManualItem(BaseModel):
+    canal:       str
+    descripcion: str
+    categoria:   str
+    monto:       float
+    fecha:       Optional[date] = None
+    
 # ─────────────────────────────────────────────────────────────────────────────
 # FACTURAS
 # ─────────────────────────────────────────────────────────────────────────────

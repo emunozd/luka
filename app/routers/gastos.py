@@ -5,8 +5,9 @@ from sqlalchemy.future import select
 from app.core.database import get_db
 from app.core.deps import get_usuario_actual
 from app.models.models import GastoManual, Usuario
-from app.schemas.schemas import GastoManualCreate, GastoManualOut
+from app.schemas.schemas import GastoManualCreate, GastoManualOut, GastoManualItem
 from app.services.ai_client import categorizar_gasto_manual
+from datetime import date
 
 router = APIRouter(prefix="/gastos", tags=["gastos"])
 
@@ -66,6 +67,28 @@ async def listar_gastos_manuales(
     )
     return result.scalars().all()
 
+@router.post("/manual/confirmar", response_model=list[GastoManualOut], status_code=status.HTTP_201_CREATED)
+async def confirmar_gastos_manuales(
+    payload: list[GastoManualItem],
+    db: AsyncSession = Depends(get_db),
+    usuario: Usuario = Depends(get_usuario_actual),
+):
+    gastos_creados = []
+    for item in payload:
+        gasto = GastoManual(
+            usuario_id  = usuario.id,
+            canal       = item.canal,
+            descripcion = item.descripcion,
+            monto       = item.monto,
+            categoria   = item.categoria,
+            fecha       = item.fecha or date.today(),
+        )
+        db.add(gasto)
+        gastos_creados.append(gasto)
+    await db.commit()
+    for g in gastos_creados:
+        await db.refresh(g)
+    return gastos_creados
 
 @router.delete("/manual/{gasto_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def eliminar_gasto_manual(
