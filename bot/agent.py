@@ -300,12 +300,12 @@ def agente_luka(texto: str, token: str, ultimos_guardados: list = None) -> dict:
             return {"tipo": "texto", "respuesta": "📭 No tienes gastos registrados para borrar."}
 
         contexto_borrar = _accion_ultimos_contexto(ultimos)
-        prompt_borrar   = (
+        prompt_borrar = (
             f"El usuario quiere borrar un gasto. Sus últimos registros son:\n{contexto_borrar}\n\n"
             f"Identifica cuál quiere borrar basándote en: '{texto}'\n"
-            f"Si puedes identificarlo con certeza, responde ÚNICAMENTE con este formato exacto:\n"
+            f"Si puedes identificarlo con certeza, responde ÚNICAMENTE con este formato exacto en una sola línea, sin texto adicional:\n"
             f"BORRAR_PENDIENTE|<id>|<descripcion>|<monto>\n"
-            f"El monto debe ser número puro sin símbolo ni comas.\n"
+            f"El monto debe ser número puro sin símbolo ni comas. Sin saltos de línea. Sin explicaciones.\n"
             f"Si no puedes identificarlo con certeza, responde en español preguntando cuál es."
         )
         with httpx.Client(timeout=60.0) as client:
@@ -327,7 +327,8 @@ def agente_luka(texto: str, token: str, ultimos_guardados: list = None) -> dict:
         texto_borrar = resp_borrar["choices"][0]["message"].get("content", "").strip()
         if texto_borrar.startswith("BORRAR_PENDIENTE|"):
             partes    = texto_borrar.split("|")
-            monto_raw = partes[3].replace("$", "").replace(",", "").strip()
+            #monto_raw = partes[3].replace("$", "").replace(",", "").strip()
+            monto_raw = partes[3].split("\n")[0].replace("$", "").replace(",", "").strip()
             return {
                 "tipo":        "confirmar_borrado",
                 "id":          partes[1],
