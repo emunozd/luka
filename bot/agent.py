@@ -20,13 +20,6 @@ API_URL    = os.environ.get("LUKA_API_URL", "http://luka-api:8000")
 
 MES_ACTUAL = datetime.now().strftime("%Y-%m")
 
-_TRIGGERS_GASTO = (
-    "pagué", "pague", "compré", "compre", "gasté", "gaste",
-    "me costó", "me costo", "invertí", "inverti", "me cobró",
-    "me cobro", "desembolsé", "desembolse", "salió", "salio",
-    "vale", "valió", "valio", "costó", "costo",
-)
-
 SYSTEM_PROMPT = f"""Eres LUKA, el asistente de finanzas personales para colombianos.
 El usuario te habla por Telegram en lenguaje natural. Tu trabajo es entender qué quiere y ejecutar la acción correcta.
 
@@ -140,10 +133,6 @@ TOOLS = [
 
 def _headers(token: str) -> dict:
     return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-
-def _es_gasto_directo(texto: str) -> bool:
-    texto_lower = texto.lower()
-    return any(t in texto_lower for t in _TRIGGERS_GASTO)
 
 def _ejecutar_tool(nombre: str, args: dict, token: str) -> str:
     try:
@@ -276,14 +265,6 @@ def agente_luka(texto: str, token: str) -> dict:
     """
     messages = [{"role": "user", "content": texto}]
 
-    # Si el texto claramente es un gasto, forzar la tool directamente
-    tool_choice = (
-        {"type": "tool", "name": "registrar_gasto"}
-        if _es_gasto_directo(texto)
-        else {"type": "auto"}
-    )
-
-
     with httpx.Client(timeout=120.0) as client:
         # Ronda 1 — usar /v1/messages (Anthropic-compatible, tool calling funcional)
         r = client.post(
@@ -292,7 +273,7 @@ def agente_luka(texto: str, token: str) -> dict:
                 "model":       "luka",
                 "messages":    messages,
                 "tools":       TOOLS,
-                "tool_choice": tool_choice,
+                "tool_choice": {"type": "auto"},
                 "max_tokens":  512,
                 "system":      SYSTEM_PROMPT,
             },
