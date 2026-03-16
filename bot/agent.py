@@ -25,6 +25,12 @@ El usuario te habla por Telegram en lenguaje natural. Tu trabajo es entender qu�
 
 FECHA ACTUAL: {MES_ACTUAL}
 
+ACCIONES DISPONIBLES — solo puedes hacer estas cuatro cosas:
+1. Registrar un gasto → usa registrar_gasto
+2. Ver reporte del mes → usa ver_reporte
+3. Ver últimos gastos → usa ver_ultimos
+4. Borrar un gasto → usa borrar_gasto (o formato BORRAR_PENDIENTE si necesitas confirmación)
+
 REGLAS:
 - Si el usuario menciona un gasto (pagué, compré, gasté, me costó, etc.) → usa registrar_gasto INMEDIATAMENTE.
 - Si el usuario quiere saber cuánto ha gastado, un resumen o reporte → usa ver_reporte INMEDIATAMENTE.
@@ -32,6 +38,8 @@ REGLAS:
 - Si el usuario quiere borrar o eliminar un registro y ya tienes el ID → responde ÚNICAMENTE con este formato exacto: BORRAR_PENDIENTE|<id>|<descripcion>|<monto>
 - Si el usuario quiere borrar pero no sabes cuál → llama ver_ultimos primero, luego usa el formato BORRAR_PENDIENTE con el ID correcto.
 - Si no es ninguna de las anteriores → responde directamente en texto, amigable y breve.
+- Si la pregunta NO está relacionada con ninguna de las 4 acciones anteriores → responde ÚNICAMENTE con: FUERA_DE_SCOPE
+- NUNCA respondas preguntas generales, de conocimiento, noticias, precios de activos, clima, ni nada que no sea finanzas personales del usuario.
 - NUNCA respondas en inglés. SIEMPRE en español colombiano.
 - NUNCA menciones los nombres internos de las herramientas al usuario (ver_ultimos, registrar_gasto, ver_reporte, etc.).
 - NUNCA pidas clarificación si la intención es clara. Actúa directamente.
@@ -276,7 +284,10 @@ def agente_luka(texto: str, token: str) -> dict:
     if stop_reason != "tool_use":
         for block in content_blocks:
             if block.get("type") == "text":
-                return {"tipo": "texto", "respuesta": block.get("text", "No entendí eso. Intenta de nuevo.")}
+                texto_bloque = block.get("text", "").strip()
+                if texto_bloque == "FUERA_DE_SCOPE":
+                    return {"tipo": "texto", "respuesta": "Solo puedo ayudarte con tus finanzas personales: registrar gastos, ver reportes o revisar tu historial. 💸"}
+                return {"tipo": "texto", "respuesta": texto_bloque}
         return {"tipo": "texto", "respuesta": "No entendí eso. Intenta de nuevo."}
 
     # Con tool calls → ejecutar cada una
@@ -316,6 +327,8 @@ def agente_luka(texto: str, token: str) -> dict:
     for block in respuesta_final.get("content", []):
         if block.get("type") == "text":
             texto = block.get("text", "").strip()
+            if texto == "FUERA_DE_SCOPE":
+                return {"tipo": "texto", "respuesta": "Solo puedo ayudarte con tus finanzas personales: registrar gastos, ver reportes o revisar tu historial. 💸"}
             if texto.startswith("BORRAR_PENDIENTE|"):
                 partes = texto.split("|")
                 monto_raw = partes[3].replace("$", "").replace(",", "").strip()
