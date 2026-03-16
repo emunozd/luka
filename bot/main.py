@@ -407,7 +407,19 @@ async def callback_confirmar_gasto_agente(update: Update, context: ContextTypes.
         await query.edit_message_text("❌ Sesión expirada. Intenta nuevamente.")
         return
     try:
-        _post("/facturas/texto/confirmar", preview, token=token)
+        # Guardar cada categoría como gasto manual independiente
+        for cat, monto in preview["categorias"].items():
+            desc = preview.get("descripciones", {}).get(cat) or preview.get("raw_text", cat)
+            _post(
+                "/gastos/manual",
+                {
+                    "canal":       "telegram",
+                    "descripcion": desc,
+                    "categoria":   cat,
+                    "monto":       monto,
+                },
+                token=token,
+            )
         await query.edit_message_text("✅ ¡Gasto guardado exitosamente!")
     except Exception as e:
         logger.error("Error en callback_confirmar_gasto_agente: %s", e)

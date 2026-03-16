@@ -155,21 +155,26 @@ def _ejecutar_tool(nombre: str, args: dict, token: str) -> str:
 
 
 def _tool_registrar_gasto(descripcion: str, token: str) -> str:
-    """Llama al endpoint de preview (categoriza sin guardar) y devuelve el resultado."""
+    """Categoriza sin guardar usando el endpoint de LUKA AI directo."""
     with httpx.Client(timeout=120.0) as client:
         r = client.post(
-            f"{API_URL}/facturas/texto/preview",
-            json={"texto": descripcion},
+            f"{API_URL}/luka/categorizar-gasto-manual",
+            json={"descripcion": descripcion},
             headers=_headers(token),
         )
         r.raise_for_status()
-        preview = r.json()
-    if not preview.get("categorias"):
+        items = r.json()  # lista de {categoria, monto, descripcion}
+
+    if not items:
         return "No se pudo categorizar el gasto."
+
     lines = ["PREVIEW_GASTO"]
     lines.append(f"raw_text={descripcion}")
-    for cat, monto in preview["categorias"].items():
-        lines.append(f"{cat}:{monto}")
+    for item in items:
+        cat   = item["categoria"]
+        monto = item["monto"]
+        desc  = item.get("descripcion") or descripcion
+        lines.append(f"{cat}:{monto}:{desc}")
     return "\n".join(lines)
 
 
@@ -310,14 +315,23 @@ def agente_luka(texto: str, token: str) -> dict:
 
          # Interceptar preview de gasto antes de ir a ronda 2
         if nombre == "registrar_gasto" and resultado.startswith("PREVIEW_GASTO"):
-            lineas = resultado.split("\n")
+            lineas   = resultado.split("\n")
             raw_text = next((l.split("=", 1)[1] for l in lineas if l.startswith("raw_text=")), "")
             categorias = {}
+            descripciones = {}
             for l in lineas[2:]:
-                if ":" in l:
-                    cat, monto = l.split(":", 1)
-                    categorias[cat] = float(monto)
-            preview_gasto = {"texto": raw_text, "categorias": categorias}
+                partes = l.split(":", 2)
+                if len(partes) >= 2:
+                    cat   = partes[0]
+                    monto = float(partes[1])
+                    desc  = partes[2] if len(partes) == 3 else raw_text
+                    categorias[cat]    = monto
+                    descripciones[cat] = desc
+            preview_gasto = {
+                "raw_text":     raw_text,
+                "categorias":   categorias,
+                "descripciones": descripciones,
+            }
             resultado = "Preview generado correctamente."
 
         tool_results.append({
@@ -329,10 +343,11 @@ def agente_luka(texto: str, token: str) -> dict:
         # Si hay preview de gasto → retornar para confirmación sin ir a ronda 2
     if preview_gasto:
         total = sum(preview_gasto["categorias"].values())
-        lineas_preview = ["Esto es lo que voy a registrar:"]
+        lineas_preview = ["📋 Esto es lo que voy a registrar:\n"]
         for cat, monto in preview_gasto["categorias"].items():
-            lineas_preview.append(f"- {cat}: ${float(monto):,.0f}")
-        lineas_preview.append(f"Total: ${total:,.0f}")
+            desc = preview_gasto["descripciones"].get(cat, "")
+            lineas_preview.append(f"- **{cat}**: ${float(monto):,.0f} — {desc}")
+        lineas_preview.append(f"\n💰 Total: ${sum(preview_gasto['categorias'].values()):,.0f}")
         return {
             "tipo":        "confirmar_gasto",
             "respuesta":   "\n".join(lineas_preview),
