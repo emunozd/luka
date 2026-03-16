@@ -81,7 +81,7 @@ def _accion_gasto(texto: str, token: str) -> dict:
     """Categoriza el gasto via AIBase y retorna preview para confirmación."""
     with httpx.Client(timeout=120.0) as client:
         r = client.post(
-            f"{API_URL}/luka/categorizar-gasto-manual",
+            f"{AIBASE_URL}/luka/categorizar-gasto-manual",
             json={"descripcion": texto},
             headers=_headers(token),
         )
