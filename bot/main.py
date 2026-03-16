@@ -35,11 +35,12 @@ API_URL        = os.environ.get("LUKA_API_URL", "http://luka-api:8000")
 VINCULAR_EMAIL  = 1
 VINCULAR_CODIGO = 2
 
-KEY_TOKEN   = "jwt_token"
-KEY_ULTIMOS = "ultimos_gastos"
-KEY_PREVIEW = "preview_data"
+KEY_TOKEN            = "jwt_token"
+KEY_ULTIMOS          = "ultimos_gastos"       # lista de dicts para /borrar por comando
+KEY_ULTIMOS_AGENTE   = "ultimos_agente"       # lista de dicts mostrada por el agente
+KEY_PREVIEW          = "preview_data"
 KEY_BORRAR_PENDIENTE = "borrar_pendiente"
-KEY_GASTO_PENDIENTE = "gasto_pendiente"
+KEY_GASTO_PENDIENTE  = "gasto_pendiente"
 
 COMANDOS_TEXTO = (
     "Comandos disponibles:\n"
@@ -112,7 +113,7 @@ def _token_o_recuperar(context: ContextTypes.DEFAULT_TYPE, telegram_id: int) -> 
 
 def _formatear_categorias(categorias: dict) -> str:
     lineas = []
-    total = 0
+    total  = 0
     for cat, monto in categorias.items():
         lineas.append(f"  • {cat}: ${float(monto):,.0f}")
         total += float(monto)
@@ -130,14 +131,13 @@ def _formatear_preview_texto(data: dict) -> str:
     return "\n".join(lines)
 
 def _enviar_respuesta_agente(texto: str) -> str:
-    """Limpia el markdown del modelo para que Telegram lo renderice bien."""
-    # Convertir **texto** → <b>texto</b>  y  *texto* → <i>texto</i>
+    """Convierte markdown del modelo a HTML para Telegram."""
     texto = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', texto)
     texto = re.sub(r'\*(.+?)\*',     r'<i>\1</i>', texto)
     return texto
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Handlers — sin cambios respecto al original
+# Handlers
 # ─────────────────────────────────────────────────────────────────────────────
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -164,9 +164,31 @@ async def handle_texto_libre(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     await update.message.reply_text("⏳ Procesando...")
     try:
-        resultado = agente_luka(texto, token)
+        # Pasar los ultimos guardados por el agente si existen (para BORRAR)
+        ultimos_guardados = context.user_data.get(KEY_ULTIMOS_AGENTE)
+        resultado = agente_luka(texto, token, ultimos_guardados=ultimos_guardados)
 
-        if resultado["tipo"] == "confirmar_borrado":
+        if resultado["tipo"] == "ultimos":
+            # Guardar la lista para uso posterior en BORRAR
+            context.user_data[KEY_ULTIMOS_AGENTE] = resultado["registros"]
+            await update.message.reply_text(
+                resultado["respuesta"],
+                parse_mode="HTML",
+            )
+
+        elif resultado["tipo"] == "confirmar_gasto":
+            context.user_data[KEY_GASTO_PENDIENTE] = resultado["preview"]
+            keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton("✅ Guardar",  callback_data="confirmar_gasto_agente"),
+                InlineKeyboardButton("❌ Cancelar", callback_data="cancelar_gasto_agente"),
+            ]])
+            await update.message.reply_text(
+                _enviar_respuesta_agente(resultado["respuesta"]),
+                parse_mode="HTML",
+                reply_markup=keyboard,
+            )
+
+        elif resultado["tipo"] == "confirmar_borrado":
             context.user_data[KEY_BORRAR_PENDIENTE] = {
                 "id":          resultado["id"],
                 "descripcion": resultado["descripcion"],
@@ -177,26 +199,17 @@ async def handle_texto_libre(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 InlineKeyboardButton("❌ Cancelar",  callback_data="cancelar_borrado_agente"),
             ]])
             await update.message.reply_text(
-                f"🗑️ ¿Eliminar *{resultado['descripcion']}* — ${resultado['monto']:,.0f}?",
-                parse_mode="Markdown",
-                reply_markup=keyboard,
-            )
-        elif resultado["tipo"] == "confirmar_gasto":
-            context.user_data[KEY_GASTO_PENDIENTE] = resultado["preview"]
-            keyboard = InlineKeyboardMarkup([[
-                InlineKeyboardButton("✅ Guardar",   callback_data="confirmar_gasto_agente"),
-                InlineKeyboardButton("❌ Cancelar",  callback_data="cancelar_gasto_agente"),
-            ]])
-            await update.message.reply_text(
                 _enviar_respuesta_agente(resultado["respuesta"]),
                 parse_mode="HTML",
                 reply_markup=keyboard,
-            )            
+            )
+
         else:
             await update.message.reply_text(
                 _enviar_respuesta_agente(resultado["respuesta"]),
                 parse_mode="HTML",
             )
+
     except Exception as e:
         logger.error("Error en agente_luka: %s", e)
         await update.message.reply_text("❌ No pude procesar eso. Intenta de nuevo.")
@@ -235,7 +248,7 @@ async def vincular_recibir_codigo(update: Update, context: ContextTypes.DEFAULT_
     email  = context.user_data.get("email_vincular")
     try:
         resultado = _post("/auth/verificar-codigo", {"email": email, "codigo": codigo})
-        token = resultado["access_token"]
+        token     = resultado["access_token"]
         _post(
             "/auth/vincular-telegram",
             {
@@ -267,6 +280,7 @@ async def cmd_desvincular(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _delete("/auth/desvincular-telegram", token)
         context.user_data.pop(KEY_TOKEN, None)
         context.user_data.pop(KEY_ULTIMOS, None)
+        context.user_data.pop(KEY_ULTIMOS_AGENTE, None)
         context.user_data.pop(KEY_PREVIEW, None)
         await update.message.reply_text(
             "✅ Telegram desvinculado exitosamente.\n\n"
@@ -292,7 +306,7 @@ async def cmd_gasto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("⏳ Procesando...")
     try:
         gastos = _post("/gastos/manual", {"canal": "telegram", "descripcion": descripcion}, token=token)
-        lines = ["✅ *Gastos registrados:*\n"]
+        lines  = ["✅ *Gastos registrados:*\n"]
         for g in gastos:
             lines.append(f"  • {g['categoria']}: ${float(g['monto']):,.0f} — {g['descripcion']}")
         await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
@@ -307,14 +321,14 @@ async def handle_foto(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await update.message.reply_text("⏳ Analizando la imagen...")
     try:
-        photo  = update.message.photo[-1]
-        tfile  = await photo.get_file()
-        fbytes = await tfile.download_as_bytearray()
+        photo   = update.message.photo[-1]
+        tfile   = await photo.get_file()
+        fbytes  = await tfile.download_as_bytearray()
         preview = _post_file("/facturas/foto/preview", bytes(fbytes), token)
         context.user_data[KEY_PREVIEW] = preview
-        texto = _formatear_preview_texto(preview)
+        texto    = _formatear_preview_texto(preview)
         keyboard = InlineKeyboardMarkup([[
-            InlineKeyboardButton("✅ Guardar", callback_data="confirmar_foto"),
+            InlineKeyboardButton("✅ Guardar",  callback_data="confirmar_foto"),
             InlineKeyboardButton("❌ Cancelar", callback_data="cancelar_preview"),
         ]])
         await update.message.reply_text(texto, parse_mode="Markdown", reply_markup=keyboard)
@@ -363,16 +377,15 @@ async def callback_cancelar_preview(update: Update, context: ContextTypes.DEFAUL
     await query.edit_message_text("❌ Cancelado. No se guardó nada.")
 
 async def callback_confirmar_borrado_agente(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
+    query     = update.callback_query
     await query.answer()
-    token    = _token_o_recuperar(context, update.effective_user.id)
+    token     = _token_o_recuperar(context, update.effective_user.id)
     pendiente = context.user_data.get(KEY_BORRAR_PENDIENTE)
     if not token or not pendiente:
         await query.edit_message_text("❌ Sesión expirada. Intenta nuevamente.")
         return
     try:
         with httpx.Client(timeout=30.0) as client:
-            # intentar gasto manual primero, luego factura
             r = client.delete(
                 f"{API_URL}/gastos/manual/{pendiente['id']}",
                 headers={"Authorization": f"Bearer {token}"},
@@ -383,6 +396,8 @@ async def callback_confirmar_borrado_agente(update: Update, context: ContextType
                     headers={"Authorization": f"Bearer {token}"},
                 )
             r.raise_for_status()
+        # Limpiar la lista guardada porque ya no está vigente
+        context.user_data.pop(KEY_ULTIMOS_AGENTE, None)
         await query.edit_message_text(
             f"✅ Eliminado: {pendiente['descripcion']} — ${pendiente['monto']:,.0f}"
         )
@@ -399,7 +414,7 @@ async def callback_cancelar_borrado_agente(update: Update, context: ContextTypes
     await query.edit_message_text("❌ Cancelado. No se eliminó nada.")
 
 async def callback_confirmar_gasto_agente(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
+    query   = update.callback_query
     await query.answer()
     token   = _token_o_recuperar(context, update.effective_user.id)
     preview = context.user_data.get(KEY_GASTO_PENDIENTE)
@@ -435,15 +450,15 @@ async def cmd_reporte(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not token:
         await update.message.reply_text("⚠️ Primero vincula tu cuenta con /vincular")
         return
-    mes = context.args[0] if context.args else None
+    mes  = context.args[0] if context.args else None
     path = f"/reportes/mensual?mes={mes}" if mes else "/reportes/mensual"
     try:
         data = _get(path, token)
         if not data:
             await update.message.reply_text("📭 No hay gastos registrados para ese período.")
             return
-        mes_label = data[0]["mes"] if data else mes or datetime.now().strftime("%Y-%m")
-        lines = [f"📊 *Reporte {mes_label}:*\n"]
+        mes_label     = data[0]["mes"] if data else mes or datetime.now().strftime("%Y-%m")
+        lines         = [f"📊 *Reporte {mes_label}:*\n"]
         total_general = 0
         for item in data:
             lines.append(f"  • {item['categoria']}: ${float(item['total']):,.0f}")
@@ -527,7 +542,8 @@ async def cmd_borrar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         with httpx.Client(timeout=30.0) as client:
             r = client.delete(f"{API_URL}{path}", headers={"Authorization": f"Bearer {token}"})
             r.raise_for_status()
-        context.user_data[KEY_ULTIMOS] = None
+        context.user_data[KEY_ULTIMOS]        = None
+        context.user_data[KEY_ULTIMOS_AGENTE] = None
         icono = "🧾" if tipo == "factura" else "💸"
         await update.message.reply_text(
             f"✅ Eliminado: {icono} {registro['descripcion']} — ${float(registro['monto']):,.0f}"
@@ -569,13 +585,13 @@ def main():
     app.add_handler(CommandHandler("reporte",     cmd_reporte))
     app.add_handler(CommandHandler("ultimos",     cmd_ultimos))
     app.add_handler(CommandHandler("borrar",      cmd_borrar))
-    app.add_handler(CallbackQueryHandler(callback_confirmar_foto,   pattern="^confirmar_foto$"))
-    app.add_handler(CallbackQueryHandler(callback_confirmar_texto,  pattern="^confirmar_texto$"))
-    app.add_handler(CallbackQueryHandler(callback_cancelar_preview, pattern="^cancelar_preview$"))
+    app.add_handler(CallbackQueryHandler(callback_confirmar_foto,           pattern="^confirmar_foto$"))
+    app.add_handler(CallbackQueryHandler(callback_confirmar_texto,          pattern="^confirmar_texto$"))
+    app.add_handler(CallbackQueryHandler(callback_cancelar_preview,         pattern="^cancelar_preview$"))
     app.add_handler(CallbackQueryHandler(callback_confirmar_borrado_agente, pattern="^confirmar_borrado_agente$"))
     app.add_handler(CallbackQueryHandler(callback_cancelar_borrado_agente,  pattern="^cancelar_borrado_agente$"))
-    app.add_handler(CallbackQueryHandler(callback_confirmar_gasto_agente, pattern="^confirmar_gasto_agente$"))
-    app.add_handler(CallbackQueryHandler(callback_cancelar_gasto_agente,  pattern="^cancelar_gasto_agente$"))
+    app.add_handler(CallbackQueryHandler(callback_confirmar_gasto_agente,   pattern="^confirmar_gasto_agente$"))
+    app.add_handler(CallbackQueryHandler(callback_cancelar_gasto_agente,    pattern="^cancelar_gasto_agente$"))
     app.add_handler(MessageHandler(filters.PHOTO, handle_foto))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_texto_libre))
     app.add_handler(MessageHandler(filters.COMMAND, cmd_desconocido))

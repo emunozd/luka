@@ -4,10 +4,11 @@ bot/agent.py — Agente conversacional LUKA
 Flujo: clasificador liviano → acción directa o modelo completo.
 El clasificador es una llamada rápida al modelo que devuelve
 una sola palabra: GASTO, REPORTE, ULTIMOS, BORRAR, u OTRO.
-Esto evita depender del tool calling inconsistente de Qwen.
+Los comandos /gasto, /reporte etc. siguen funcionando exactamente igual.
 """
 import logging
 import os
+import re
 from datetime import datetime
 
 import httpx
@@ -35,14 +36,15 @@ Responde ÚNICAMENTE con una de estas palabras, sin puntuación ni explicación:
 
 Mensaje: {texto}"""
 
+
 def _clasificar_intencion(texto: str) -> str:
-    """Llama al modelo con un prompt mínimo y devuelve la intención en una palabra."""
+    """Llama al modelo con prompt mínimo y devuelve la intención en una palabra."""
     with httpx.Client(timeout=30.0) as client:
         r = client.post(
             f"{AIBASE_URL}/v1/chat/completions",
             json={
-                "model":      "luka",
-                "messages":   [{"role": "user", "content": PROMPT_CLASIFICADOR.format(texto=texto)}],
+                "model":    "luka",
+                "messages": [{"role": "user", "content": PROMPT_CLASIFICADOR.format(texto=texto)}],
                 "max_tokens": 10,
             },
             headers={"Content-Type": "application/json"},
@@ -50,16 +52,15 @@ def _clasificar_intencion(texto: str) -> str:
         r.raise_for_status()
         respuesta = r.json()
 
-    raw = respuesta["choices"][0]["message"].get("content", "OTRO").strip().upper()
-    # Tomar solo la primera palabra por si el modelo agrega algo extra
-    primera = raw.split()[0] if raw.split() else "OTRO"
+    raw      = respuesta["choices"][0]["message"].get("content", "OTRO").strip().upper()
+    primera  = raw.split()[0] if raw.split() else "OTRO"
     if primera in ("GASTO", "REPORTE", "ULTIMOS", "BORRAR"):
         return primera
     return "OTRO"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Prompt para respuesta final (reporte, ultimos, borrar, otro)
+# System prompt para respuestas finales del modelo
 # ─────────────────────────────────────────────────────────────────────────────
 
 SYSTEM_RESPUESTA = f"""Eres LUKA, el asistente de finanzas personales para colombianos.
@@ -74,13 +75,18 @@ REGLAS DE FORMATO:
 - El consejo debe ser una observación útil y corta, no una oferta de servicio.
 """
 
+
 # ─────────────────────────────────────────────────────────────────────────────
-# Acciones directas — no pasan por el modelo
+# Helpers HTTP
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _headers(token: str) -> dict:
     return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Acciones directas
+# ─────────────────────────────────────────────────────────────────────────────
 
 def _accion_gasto(texto: str, token: str) -> dict:
     """Categoriza el gasto via AIBase y retorna preview para confirmación."""
@@ -88,7 +94,6 @@ def _accion_gasto(texto: str, token: str) -> dict:
         r = client.post(
             f"{AIBASE_URL}/luka/categorizar-gasto-manual",
             json={"descripcion": texto},
-            headers=_headers(token),
         )
         r.raise_for_status()
         items = r.json()
@@ -99,25 +104,24 @@ def _accion_gasto(texto: str, token: str) -> dict:
     categorias    = {}
     descripciones = {}
     for item in items:
-        cat  = item["categoria"]
+        cat   = item["categoria"]
         monto = item.get("monto")
         if monto is None:
             return {"tipo": "texto", "respuesta": "❌ No detecté el monto. Incluye el valor, por ejemplo: 'gasté 15mil en el bus'."}
-        desc = item.get("descripcion") or texto
+        desc               = item.get("descripcion") or texto
         categorias[cat]    = float(monto)
         descripciones[cat] = desc
 
     total          = sum(categorias.values())
     lineas_preview = ["📋 Esto es lo que voy a registrar:\n"]
     for cat, monto in categorias.items():
-        desc = descripciones.get(cat, "")
-        lineas_preview.append(f"- <b>{cat}</b>: ${float(monto):,.0f} — {desc}")
+        lineas_preview.append(f"- <b>{cat}</b>: ${float(monto):,.0f} — {descripciones[cat]}")
     lineas_preview.append(f"\n💰 Total: ${total:,.0f}")
 
     return {
         "tipo":      "confirmar_gasto",
         "respuesta": "\n".join(lineas_preview),
-        "preview":   {
+        "preview": {
             "raw_text":      texto,
             "categorias":    categorias,
             "descripciones": descripciones,
@@ -125,8 +129,8 @@ def _accion_gasto(texto: str, token: str) -> dict:
     }
 
 
-def _accion_ultimos(token: str) -> str:
-    """Obtiene últimos registros y devuelve string formateado para el modelo."""
+def _obtener_ultimos(token: str) -> list:
+    """Devuelve lista cruda de últimos 5 registros combinados."""
     with httpx.Client(timeout=30.0) as client:
         r_gastos = client.get(f"{API_URL}/gastos/manual", headers=_headers(token))
         r_gastos.raise_for_status()
@@ -155,11 +159,13 @@ def _accion_ultimos(token: str) -> str:
         })
 
     combinados.sort(key=lambda x: x.get("fecha", ""), reverse=True)
-    ultimos = combinados[:5]
+    return combinados[:5]
 
+
+def _accion_ultimos_contexto(ultimos: list) -> str:
+    """Versión con IDs para pasarle al modelo en el flujo de BORRAR."""
     if not ultimos:
         return "No tienes gastos registrados."
-
     lines = ["Últimos registros:"]
     for i, r in enumerate(ultimos, 1):
         tipo_label = "factura" if r["tipo"] == "factura" else "gasto manual"
@@ -171,9 +177,7 @@ def _accion_ultimos(token: str) -> str:
 
 
 def _accion_reporte(texto: str, token: str) -> str:
-    """Determina el mes del reporte y obtiene los datos."""
-    # Intentar extraer mes del texto
-    import re
+    """Determina el mes y obtiene datos del reporte."""
     match = re.search(r"(20\d{2})[.\-/](0[1-9]|1[0-2])", texto)
     if match:
         mes = f"{match.group(1)}-{match.group(2)}"
@@ -208,18 +212,13 @@ def _accion_reporte(texto: str, token: str) -> str:
     return "\n".join(lines)
 
 
-def _accion_borrar(texto: str, token: str) -> str:
-    """Obtiene últimos registros para que el modelo pueda identificar cuál borrar."""
-    return _accion_ultimos(token)
-
-
 # ─────────────────────────────────────────────────────────────────────────────
-# Respuesta final via modelo — solo para formatear, no para decidir
+# Respuesta final via modelo
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _respuesta_modelo(texto_usuario: str, contexto: str) -> str:
     """Llama al modelo con el contexto ya resuelto para que genere respuesta natural."""
-    prompt_usuario = f"Pregunta del usuario: {texto_usuario}\n\nDatos disponibles:\n{contexto}"
+    prompt = f"Pregunta del usuario: {texto_usuario}\n\nDatos disponibles:\n{contexto}"
     with httpx.Client(timeout=60.0) as client:
         r = client.post(
             f"{AIBASE_URL}/v1/chat/completions",
@@ -227,7 +226,7 @@ def _respuesta_modelo(texto_usuario: str, contexto: str) -> str:
                 "model":    "luka",
                 "messages": [
                     {"role": "system", "content": SYSTEM_RESPUESTA},
-                    {"role": "user",   "content": prompt_usuario},
+                    {"role": "user",   "content": prompt},
                 ],
                 "max_tokens": 400,
             },
@@ -246,43 +245,68 @@ def _respuesta_modelo(texto_usuario: str, contexto: str) -> str:
 # Punto de entrada principal
 # ─────────────────────────────────────────────────────────────────────────────
 
-def agente_luka(texto: str, token: str) -> dict:
+def agente_luka(texto: str, token: str, ultimos_guardados: list = None) -> dict:
     """
     Retorna:
-      {"tipo": "texto",            "respuesta": str}
-      {"tipo": "confirmar_gasto",  "respuesta": str, "preview": dict}
-      {"tipo": "confirmar_borrado","respuesta": str, "id": str, "descripcion": str, "monto": float}
+      {"tipo": "texto",             "respuesta": str}
+      {"tipo": "confirmar_gasto",   "respuesta": str, "preview": dict}
+      {"tipo": "confirmar_borrado", "respuesta": str, "id": str, "descripcion": str, "monto": float}
+      {"tipo": "ultimos",           "respuesta": str, "registros": list}
+
+    ultimos_guardados: lista de registros ya consultados previamente (para BORRAR sin re-consultar).
     """
     logger.info("Clasificando intención: %r", texto)
     intencion = _clasificar_intencion(texto)
     logger.info("Intención detectada: %s", intencion)
 
-    # GASTO → acción directa, sin modelo
+    # ── GASTO → acción directa, sin modelo ───────────────────────────────────
     if intencion == "GASTO":
         return _accion_gasto(texto, token)
 
-    # REPORTE → obtener datos, modelo formatea
+    # ── REPORTE → obtener datos, modelo formatea ──────────────────────────────
     if intencion == "REPORTE":
         contexto  = _accion_reporte(texto, token)
         respuesta = _respuesta_modelo(texto, contexto)
         return {"tipo": "texto", "respuesta": respuesta}
 
-    # ULTIMOS → obtener datos, modelo formatea
+    # ── ULTIMOS → formato fijo en Python, sin modelo ──────────────────────────
     if intencion == "ULTIMOS":
-        contexto  = _accion_ultimos(token)
-        respuesta = _respuesta_modelo(texto, contexto)
-        return {"tipo": "texto", "respuesta": respuesta}
+        ultimos = _obtener_ultimos(token)
 
-    # BORRAR → obtener últimos, modelo identifica cuál y responde con BORRAR_PENDIENTE
+        if not ultimos:
+            return {"tipo": "texto", "respuesta": "📭 No tienes gastos registrados aún."}
+
+        lineas = ["📋 <b>Últimos registros:</b>\n"]
+        for i, r in enumerate(ultimos, 1):
+            icono = "🧾" if r["tipo"] == "factura" else "💸"
+            lineas.append(
+                f"{i}. {icono} <b>{r['descripcion']}</b> — ${float(r['monto']):,.0f}"
+                f"\n    📅 {r['fecha']}"
+            )
+        lineas.append("\n¿Quieres borrar alguno? Dime el número.")
+
+        return {
+            "tipo":      "ultimos",
+            "respuesta": "\n".join(lineas),
+            "registros": ultimos,
+        }
+
+    # ── BORRAR → usar lista guardada o consultar fresca ───────────────────────
     if intencion == "BORRAR":
-        contexto       = _accion_borrar(texto, token)
-        prompt_borrar  = (
-            f"El usuario quiere borrar un gasto. Sus últimos registros son:\n{contexto}\n\n"
+        # Usar la lista que el usuario ya vio si está disponible
+        ultimos = ultimos_guardados if ultimos_guardados else _obtener_ultimos(token)
+
+        if not ultimos:
+            return {"tipo": "texto", "respuesta": "📭 No tienes gastos registrados para borrar."}
+
+        contexto_borrar = _accion_ultimos_contexto(ultimos)
+        prompt_borrar   = (
+            f"El usuario quiere borrar un gasto. Sus últimos registros son:\n{contexto_borrar}\n\n"
             f"Identifica cuál quiere borrar basándote en: '{texto}'\n"
-            f"Si puedes identificarlo, responde ÚNICAMENTE con este formato:\n"
+            f"Si puedes identificarlo con certeza, responde ÚNICAMENTE con este formato exacto:\n"
             f"BORRAR_PENDIENTE|<id>|<descripcion>|<monto>\n"
             f"El monto debe ser número puro sin símbolo ni comas.\n"
-            f"Si no puedes identificarlo, pregunta al usuario cuál es."
+            f"Si no puedes identificarlo con certeza, responde en español preguntando cuál es."
         )
         with httpx.Client(timeout=60.0) as client:
             r = client.post(
@@ -309,10 +333,13 @@ def agente_luka(texto: str, token: str) -> dict:
                 "id":          partes[1],
                 "descripcion": partes[2],
                 "monto":       float(monto_raw),
-                "respuesta":   f"¿Eliminar {partes[2]} — ${float(monto_raw):,.0f}?",
+                "respuesta":   f"¿Eliminar <b>{partes[2]}</b> — ${float(monto_raw):,.0f}?",
             }
         return {"tipo": "texto", "respuesta": texto_borrar}
 
-    # OTRO → respuesta directa del modelo
-    respuesta = _respuesta_modelo(texto, "El usuario hizo una pregunta fuera del scope de finanzas personales.")
+    # ── OTRO → respuesta directa del modelo ──────────────────────────────────
+    respuesta = _respuesta_modelo(
+        texto,
+        "El usuario hizo una pregunta fuera del scope de finanzas personales del usuario."
+    )
     return {"tipo": "texto", "respuesta": respuesta}
