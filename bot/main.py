@@ -164,12 +164,38 @@ async def handle_texto_libre(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     await update.message.reply_text("⏳ Procesando...")
     try:
-        # Pasar los ultimos guardados por el agente si existen (para BORRAR)
         ultimos_guardados = context.user_data.get(KEY_ULTIMOS_AGENTE)
+
+        # Atajo: si hay lista guardada y el usuario mandó un número, borrar con confirmación
+        if ultimos_guardados and texto.isdigit():
+            numero = int(texto)
+            if 1 <= numero <= len(ultimos_guardados):
+                registro = ultimos_guardados[numero - 1]
+                context.user_data[KEY_BORRAR_PENDIENTE] = {
+                    "id":          registro["id"],
+                    "descripcion": registro["descripcion"],
+                    "monto":       float(registro["monto"]),
+                }
+                keyboard = InlineKeyboardMarkup([[
+                    InlineKeyboardButton("✅ Confirmar", callback_data="confirmar_borrado_agente"),
+                    InlineKeyboardButton("❌ Cancelar",  callback_data="cancelar_borrado_agente"),
+                ]])
+                await update.message.reply_text(
+                    f"🗑️ ¿Eliminar <b>{registro['descripcion']}</b> — ${float(registro['monto']):,.0f}?",
+                    parse_mode="HTML",
+                    reply_markup=keyboard,
+                )
+                return
+            else:
+                await update.message.reply_text(
+                    f"❌ Número inválido. Elige entre 1 y {len(ultimos_guardados)}."
+                )
+                return
+
+        # Flujo normal del agente
         resultado = agente_luka(texto, token, ultimos_guardados=ultimos_guardados)
 
         if resultado["tipo"] == "ultimos":
-            # Guardar la lista para uso posterior en BORRAR
             context.user_data[KEY_ULTIMOS_AGENTE] = resultado["registros"]
             await update.message.reply_text(
                 resultado["respuesta"],

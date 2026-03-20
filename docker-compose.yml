@@ -30,6 +30,7 @@ services:
     environment:
       POSTGRES_HOST: luka-postgres
       POSTGRES_PORT: 5432
+      TZ: America/Bogota
     networks:
       - luka_net
     ports:
@@ -47,6 +48,7 @@ services:
       - .env
     environment:
       LUKA_API_URL: http://luka-api:8000
+      TZ: America/Bogota
     networks:
       - luka_net
     depends_on:
