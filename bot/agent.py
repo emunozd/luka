@@ -176,21 +176,32 @@ def _accion_ultimos_contexto(ultimos: list) -> str:
     return "\n".join(lines)
 
 
+def _inferir_mes(texto: str) -> str:
+    """Le pregunta al modelo qué mes corresponde al texto del usuario."""
+    with httpx.Client(timeout=20.0) as client:
+        r = client.post(
+            f"{AIBASE_URL}/v1/chat/completions",
+            json={
+                "model":    "luka",
+                "messages": [{"role": "user", "content": (
+                    f"Hoy es {MES_ACTUAL}. El usuario dijo: '{texto}'. "
+                    f"¿A qué mes se refiere? Responde ÚNICAMENTE con el formato YYYY-MM, "
+                    f"sin texto adicional, sin explicaciones."
+                )}],
+                "max_tokens": 10,
+            },
+            headers={"Content-Type": "application/json"},
+        )
+        r.raise_for_status()
+    raw = r.json()["choices"][0]["message"].get("content", "").strip()
+    if re.match(r"20\d{2}-(0[1-9]|1[0-2])", raw):
+        return raw
+    return MES_ACTUAL
+
+
 def _accion_reporte(texto: str, token: str) -> str:
-    """Determina el mes y obtiene datos del reporte."""
-    match = re.search(r"(20\d{2})[.\-/](0[1-9]|1[0-2])", texto)
-    if match:
-        mes = f"{match.group(1)}-{match.group(2)}"
-    elif any(p in texto.lower() for p in ("mes pasado", "mes anterior", "último mes", "ultimo mes")):
-        year  = int(MES_ACTUAL[:4])
-        month = int(MES_ACTUAL[5:])
-        month -= 1
-        if month == 0:
-            month = 12
-            year -= 1
-        mes = f"{year}-{month:02d}"
-    else:
-        mes = MES_ACTUAL
+    """Infiere el mes via modelo y obtiene datos del reporte."""
+    mes = _inferir_mes(texto)
 
     with httpx.Client(timeout=30.0) as client:
         r = client.get(
