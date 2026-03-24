@@ -7,7 +7,7 @@ services:
       resources:
         limits:
           cpus: "0.50"
-          memory: 768m
+          memory: 256m
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
@@ -32,6 +32,11 @@ services:
       dockerfile: Dockerfile
     container_name: luka-api
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512m
     env_file:
       - .env
     environment:
@@ -51,6 +56,11 @@ services:
       dockerfile: Dockerfile.bot
     container_name: luka-bot
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256m
     env_file:
       - .env
     environment:
