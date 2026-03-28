@@ -6,7 +6,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.50"
+          cpus: "0.25"
           memory: 256m
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
@@ -35,8 +35,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.50"
-          memory: 512m
+          cpus: "0.75"
+          memory: 256m
     env_file:
       - .env
     environment:
