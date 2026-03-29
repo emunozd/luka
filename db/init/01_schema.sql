@@ -16,7 +16,14 @@ CREATE TYPE canal_ingreso AS ENUM (
 
 CREATE TYPE categoria_gasto AS ENUM (
     'HOGAR',
+    'HOGAR_ARRIENDO',
+    'HOGAR_SERVICIOS',
+    'HOGAR_REPARACIONES',
     'CANASTA',
+    'CANASTA_VERDURAS',
+    'CANASTA_PROTEINA',
+    'CANASTA_ASEO',
+    'CANASTA_HIGIENE',
     'MEDICAMENTOS',
     'OCIO',
     'ANTOJO',
@@ -126,38 +133,46 @@ CREATE TABLE gastos_manuales (
 -- ─────────────────────────────────────────────────────────────
 -- ÍNDICES
 -- ─────────────────────────────────────────────────────────────
-CREATE INDEX idx_usuarios_email             ON usuarios (email);
-CREATE INDEX idx_codigos_email              ON codigos_verificacion (email);
-CREATE INDEX idx_codigos_expira             ON codigos_verificacion (expira_en);
-CREATE INDEX idx_telegram_usuario           ON telegram_cuentas (usuario_id);
-CREATE INDEX idx_telegram_id               ON telegram_cuentas (telegram_id);
-CREATE INDEX idx_cargues_usuario            ON cargues_email (usuario_id);
-CREATE INDEX idx_facturas_usuario           ON facturas (usuario_id);
-CREATE INDEX idx_facturas_fecha             ON facturas (fecha_factura);
-CREATE INDEX idx_facturas_canal             ON facturas (canal);
-CREATE INDEX idx_resumen_categoria          ON resumen_categorias (categoria);
-CREATE INDEX idx_gastos_usuario             ON gastos_manuales (usuario_id);
-CREATE INDEX idx_gastos_fecha               ON gastos_manuales (fecha);
-CREATE INDEX idx_gastos_categoria           ON gastos_manuales (categoria);
+CREATE INDEX idx_usuarios_email    ON usuarios (email);
+CREATE INDEX idx_codigos_email     ON codigos_verificacion (email);
+CREATE INDEX idx_codigos_expira    ON codigos_verificacion (expira_en);
+CREATE INDEX idx_telegram_usuario  ON telegram_cuentas (usuario_id);
+CREATE INDEX idx_telegram_id       ON telegram_cuentas (telegram_id);
+CREATE INDEX idx_cargues_usuario   ON cargues_email (usuario_id);
+CREATE INDEX idx_facturas_usuario  ON facturas (usuario_id);
+CREATE INDEX idx_facturas_fecha    ON facturas (fecha_factura);
+CREATE INDEX idx_facturas_canal    ON facturas (canal);
+CREATE INDEX idx_resumen_categoria ON resumen_categorias (categoria);
+CREATE INDEX idx_gastos_usuario    ON gastos_manuales (usuario_id);
+CREATE INDEX idx_gastos_fecha      ON gastos_manuales (fecha);
+CREATE INDEX idx_gastos_categoria  ON gastos_manuales (categoria);
 
 -- ─────────────────────────────────────────────────────────────
 -- VISTA
 -- ─────────────────────────────────────────────────────────────
 CREATE VIEW gasto_mensual_por_categoria AS
+SELECT
+    usuario_id,
+    mes,
+    categoria,
+    SUM(total) AS total
+FROM (
     SELECT
         f.usuario_id,
         date_trunc('month', f.fecha_factura)::date AS mes,
         rc.categoria,
-        SUM(rc.total) AS total
+        rc.total
     FROM resumen_categorias rc
     JOIN facturas f ON f.id = rc.factura_id
     WHERE f.fecha_factura IS NOT NULL
-    GROUP BY 1, 2, 3
+
     UNION ALL
+
     SELECT
         usuario_id,
         date_trunc('month', fecha)::date AS mes,
         categoria,
-        SUM(monto) AS total
+        monto AS total
     FROM gastos_manuales
-    GROUP BY 1, 2, 3;
+) combinado
+GROUP BY usuario_id, mes, categoria;
