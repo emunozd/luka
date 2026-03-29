@@ -115,7 +115,8 @@ def _formatear_categorias(categorias: dict) -> str:
     lineas = []
     total  = 0
     for cat, monto in categorias.items():
-        lineas.append(f"  • {cat}: ${float(monto):,.0f}")
+        cat_display = cat.replace("_", " ")  # CANASTA_VERDURAS → CANASTA VERDURAS
+        lineas.append(f"  • {cat_display}: ${float(monto):,.0f}")
         total += float(monto)
     lineas.append(f"\n💰 *Total: ${total:,.0f}*")
     return "\n".join(lineas)
