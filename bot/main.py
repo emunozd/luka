@@ -594,7 +594,15 @@ async def post_init(app: Application):
     ])
 
 def main():
-    app = Application.builder().token(TELEGRAM_TOKEN).post_init(post_init).build()
+    app = (
+        Application.builder()
+        .token(TELEGRAM_TOKEN)
+        .read_timeout(240)
+        .write_timeout(240)
+        .connect_timeout(60)
+        .post_init(post_init)
+        .build()
+    )
 
     vincular_conv = ConversationHandler(
         entry_points=[CommandHandler("vincular", cmd_vincular)],
