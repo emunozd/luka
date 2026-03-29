@@ -359,9 +359,20 @@ async def handle_foto(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("❌ Cancelar", callback_data="cancelar_preview"),
         ]])
         await update.message.reply_text(texto, parse_mode="Markdown", reply_markup=keyboard)
+    except httpx.HTTPStatusError as e:
+        try:
+            detail = e.response.json().get("detail", "")
+        except Exception:
+            detail = ""
+        mensaje = detail if detail else "❌ No se pudo procesar la imagen. Intenta de nuevo."
+        logger.error("Error en handle_foto: %s", e)
+        await update.message.reply_text(mensaje, parse_mode=None)
     except Exception as e:
         logger.error("Error en handle_foto: %s", e)
-        await update.message.reply_text("❌ No se pudo procesar la imagen. Intenta de nuevo.")
+        await update.message.reply_text(
+            "❌ No se pudo procesar la imagen. Intenta de nuevo.",
+            parse_mode=None,
+        )
 
 async def callback_confirmar_foto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
