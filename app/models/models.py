@@ -115,8 +115,10 @@ class GastoManual(Base):
     canal       = Column(Enum("email", "telegram", "web", name="canal_ingreso"), nullable=False)
     descripcion = Column(Text, nullable=False)
     monto       = Column(Numeric(12, 2), nullable=False)
-    categoria   = Column(Enum(
-        "HOGAR", "CANASTA", "MEDICAMENTOS", "OCIO", "ANTOJO",
+    categoria = Column(Enum(
+        "HOGAR", "HOGAR_ARRIENDO", "HOGAR_SERVICIOS", "HOGAR_REPARACIONES",
+        "CANASTA", "CANASTA_VERDURAS", "CANASTA_PROTEINA", "CANASTA_ASEO", "CANASTA_HIGIENE",
+        "MEDICAMENTOS", "OCIO", "ANTOJO",
         "TRANSPORTE", "TECNOLOGÍA", "ROPA", "EDUCACIÓN", "MASCOTAS",
         name="categoria_gasto"
     ), nullable=False)
