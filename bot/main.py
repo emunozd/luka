@@ -21,7 +21,7 @@ from telegram.ext import (
     filters,
 )
 
-from bot.agent import agente_luka
+from bot.agent import agente_luka, _inferir_rango, _label_rango, _calcular_rango, _hoy
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -49,6 +49,7 @@ COMANDOS_TEXTO = (
     "/gasto — registra un gasto manual\n"
     "/reporte — resumen del mes actual\n"
     "/reporte AAAA-MM — resumen de un mes específico\n"
+    "/reporte esta semana — resumen de cualquier período\n"
     "/ultimos — últimos 5 gastos\n"
     "/borrar — elimina un gasto de la lista anterior\n\n"
     "También puedes enviarme una *foto de un recibo* y lo registro automáticamente. 📸\n"
@@ -434,7 +435,6 @@ async def callback_confirmar_borrado_agente(update: Update, context: ContextType
                     headers={"Authorization": f"Bearer {token}"},
                 )
             r.raise_for_status()
-        # Limpiar la lista guardada porque ya no está vigente
         context.user_data.pop(KEY_ULTIMOS_AGENTE, None)
         await query.edit_message_text(
             f"✅ Eliminado: {pendiente['descripcion']} — ${pendiente['monto']:,.0f}"
@@ -488,21 +488,47 @@ async def cmd_reporte(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not token:
         await update.message.reply_text("⚠️ Primero vincula tu cuenta con /vincular")
         return
-    mes  = context.args[0] if context.args else None
-    path = f"/reportes/mensual?mes={mes}" if mes else "/reportes/mensual"
+
+    hoy        = _hoy()
+    args_texto = " ".join(context.args) if context.args else ""
+
+    # Detectar si el argumento es un YYYY-MM clásico o texto libre
+    import re as _re
+    if _re.match(r"^20\d{2}-(0[1-9]|1[0-2])$", args_texto):
+        # Formato clásico: /reporte 2026-03 → usa endpoint mensual existente
+        desde, hasta = _calcular_rango(f"MES_NOMBRE|{args_texto}", hoy)
+    elif args_texto:
+        # Texto libre: /reporte esta semana, /reporte últimos 3 días, etc.
+        desde, hasta = _inferir_rango(args_texto)
+    else:
+        # Sin argumento: mes actual hasta hoy
+        desde, hasta = _calcular_rango("MES|0", hoy)
+
+    label = _label_rango(desde, hasta)
+    await update.message.reply_text(f"⏳ Obteniendo reporte de {label}...")
+
     try:
-        data = _get(path, token)
+        with httpx.Client(timeout=30.0) as client:
+            r = client.get(
+                f"{API_URL}/reportes/rango",
+                params={"desde": desde.isoformat(), "hasta": hasta.isoformat()},
+                headers=_headers(token),
+            )
+            r.raise_for_status()
+            data = r.json()
+
         if not data:
-            await update.message.reply_text("📭 No hay gastos registrados para ese período.")
+            await update.message.reply_text(f"📭 No hay gastos registrados para {label}.")
             return
-        mes_label     = data[0]["mes"] if data else mes or datetime.now().strftime("%Y-%m")
-        lines         = [f"📊 *Reporte {mes_label}:*\n"]
-        total_general = 0
+
+        total_general = sum(float(item["total"]) for item in data)
+        lines         = [f"📊 *Reporte {label}:*\n"]
         for item in data:
-            lines.append(f"  • {item['categoria']}: ${float(item['total']):,.0f}")
-            total_general += float(item["total"])
+            cat_display = item["categoria"].replace("_", " ")
+            lines.append(f"  • {cat_display}: ${float(item['total']):,.0f}")
         lines.append(f"\n💰 *Total: ${total_general:,.0f}*")
         await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
     except Exception as e:
         logger.error("Error en cmd_reporte: %s", e)
         await update.message.reply_text("❌ No se pudo obtener el reporte. Intenta de nuevo.")
@@ -599,7 +625,7 @@ async def post_init(app: Application):
         BotCommand("vincular",    "Conecta tu cuenta LUKA"),
         BotCommand("desvincular", "Desconecta tu Telegram (historial intacto)"),
         BotCommand("gasto",       "Registra un gasto manual"),
-        BotCommand("reporte",     "Resumen del mes o uno específico: /reporte 2026-03"),
+        BotCommand("reporte",     "Resumen: /reporte, /reporte 2026-03, /reporte esta semana"),
         BotCommand("ultimos",     "Últimos 5 gastos"),
         BotCommand("borrar",      "Elimina un gasto"),
     ])

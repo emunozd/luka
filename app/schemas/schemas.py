@@ -60,7 +60,7 @@ class GastoManualItem(BaseModel):
     categoria:   str
     monto:       float
     fecha:       Optional[date] = None
-    
+
 # ─────────────────────────────────────────────────────────────────────────────
 # FACTURAS
 # ─────────────────────────────────────────────────────────────────────────────
@@ -110,6 +110,15 @@ class ResumenCategoriaOut(BaseModel):
 
 class GastoMensualOut(BaseModel):
     mes: str  # formato YYYY-MM
+    categoria: str
+    total: Decimal
+
+    model_config = {"from_attributes": True}
+
+
+class ReporteRangoOut(BaseModel):
+    desde: date
+    hasta: date
     categoria: str
     total: Decimal
 
