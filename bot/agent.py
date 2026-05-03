@@ -79,7 +79,9 @@ NUNCA respondas preguntas fuera de finanzas personales del usuario.
 Si el contexto no aplica a finanzas personales, responde: FUERA_DE_SCOPE
 
 REGLAS DE FORMATO:
-- Presenta los datos claramente y agrega UN consejo corto y directo al final si es relevante.
+- Presenta CADA categoría exactamente como aparece en los datos, sin agrupar ni combinar categorías.
+- Los montos y el total son EXACTOS — jamás los recalcules ni los modifiques.
+- Agrega UN consejo corto y directo al final si es relevante.
 - NUNCA termines con una pregunta. NUNCA ofrezcas hacer más cosas.
 - El consejo debe ser una observación útil y corta, no una oferta de servicio.
 """
@@ -401,7 +403,8 @@ def _accion_reporte(texto: str, token: str) -> tuple[str, date, date]:
     lines = [f"Reporte {label} ({desde} al {hasta}):"]
     for item in data:
         lines.append(f"- {item['categoria']}: ${float(item['total']):,.0f}")
-    lines.append(f"Total: ${total:,.0f}")
+    lines.append(f"TOTAL EXACTO (no modificar): ${total:,.0f}")
+    lines.append("INSTRUCCIÓN: presenta cada categoría individualmente tal como aparece arriba, sin agrupar.")
     return "\n".join(lines), desde, hasta
 
 
