@@ -31,7 +31,8 @@ CREATE TYPE categoria_gasto AS ENUM (
     'TECNOLOGÍA',
     'ROPA',
     'EDUCACIÓN',
-    'MASCOTAS'
+    'MASCOTAS',
+    'SUSCRIPCIONES'
 );
 
 -- ─────────────────────────────────────────────────────────────

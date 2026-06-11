@@ -94,7 +94,7 @@ class ResumenCategoria(Base):
         "HOGAR", "HOGAR_ARRIENDO", "HOGAR_SERVICIOS", "HOGAR_REPARACIONES",
         "CANASTA", "CANASTA_VERDURAS", "CANASTA_PROTEINA", "CANASTA_ASEO", "CANASTA_HIGIENE",
         "MEDICAMENTOS", "OCIO", "ANTOJO",
-        "TRANSPORTE", "TECNOLOGÍA", "ROPA", "EDUCACIÓN", "MASCOTAS",
+        "TRANSPORTE", "TECNOLOGÍA", "ROPA", "EDUCACIÓN", "MASCOTAS", "SUSCRIPCIONES",
         name="categoria_gasto"
     ), nullable=False)
     total      = Column(Numeric(12, 2), nullable=False, default=0)
@@ -119,7 +119,7 @@ class GastoManual(Base):
         "HOGAR", "HOGAR_ARRIENDO", "HOGAR_SERVICIOS", "HOGAR_REPARACIONES",
         "CANASTA", "CANASTA_VERDURAS", "CANASTA_PROTEINA", "CANASTA_ASEO", "CANASTA_HIGIENE",
         "MEDICAMENTOS", "OCIO", "ANTOJO",
-        "TRANSPORTE", "TECNOLOGÍA", "ROPA", "EDUCACIÓN", "MASCOTAS",
+        "TRANSPORTE", "TECNOLOGÍA", "ROPA", "EDUCACIÓN", "MASCOTAS", "SUSCRIPCIONES",
         name="categoria_gasto"
     ), nullable=False)
     fecha       = Column(Date, nullable=False, default=date.today)
